@@ -136,7 +136,8 @@ module RightAws
         #
         # Accepts an optional next_token telling where to start from
       def subscriptions(next_token = nil)
-        @sns.interface.list_subscriptions_by_topic(arn, next_token)
+        result = @sns.interface.list_subscriptions_by_topic(arn, next_token)
+        SubscriptionListResponse.new(self, result[:members], result[:next_token])
       end
       
         # Returns a <Member> object
@@ -157,14 +158,9 @@ module RightAws
         @sns.interface.remove_permissions(arn, label)
       end
       
-        # Confirms a subscription (if you don't have the <Sns::Member> object)
+        # Given a token, confirm the subscription on the topic
       def confirm_subscription(token, authenticate_on_unsubscribe = false)
-        member               = Member.new
-        member.sns_interface = @sns.interface
-        member.topic_arn     = arn
-        member.token         = token
-        
-        member.confirm(authenticate_on_unsubscribe)
+        @sns.interface.confirm_subscription(arn, token, authenticate_on_unsubscribe)
       end
 
       private
@@ -180,7 +176,6 @@ module RightAws
       end
     end
     
-    
     class Message
       attr_reader :topic, :id, :body, :subject
       
@@ -192,11 +187,50 @@ module RightAws
       end
     end
     
-    class Member
-      attr_accessor :sns_interface, :topic_arn, :token
+    class SubscriptionListResponse
+      attr_reader :topic, :next_token, :members
       
-      def confirm(authenticate_on_unsubscribe = false)
-        sns_interface.confirm_subscription(topic_arn, token, authenticate_on_unsubscribe)
+      def initialize(topic, members, next_token = nil)
+        @topic = topic
+        self.members = members
+        @next_token = next_token
+      end
+      
+      private
+      
+      def members=(members)
+        if members.length > 0 && 
+            members.all? { |member| member.is_a?(Member) }
+          return @members = members 
+        elsif members.any? { |member| member.is_a?(Member) }
+          raise ArgumentError, "Mismatch on subscription members class types."
+        else # Assume it's interface hash data for us to wrap
+          @members = members.map { |member_data| Member.new(topic.sns, member_data) }
+        end
+      end
+    end
+    
+    class Member
+      attr_accessor :topic_arn, :protocol, :subscription_arn, :owner, :endpoint
+      attr_reader :subscription, :sns_interface
+      
+      def initialize(sns, member_data)
+        @sns_interface = sns.interface
+        self.topic_arn = member_data['TopicArn']
+        self.protocol = member_data['Protocol']
+        self.subscription_arn = member_data['SubscriptionArn']
+        self.owner = member_data['Owner']
+        self.endpoint = member_data['Endpoint']
+      end
+      
+      # def confirm(token, authenticate_on_unsubscribe = false)
+      #   raise "A topic arn and token are required for confirmation." unless topic_arn && token
+      #   sns_interface.confirm_subscription(topic_arn, token, authenticate_on_unsubscribe)
+      # end
+    
+      def parse(text)
+        # TODO?
+        raise "not implemented"
       end
     end
     
